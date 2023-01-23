@@ -1,0 +1,7 @@
+**/*.png
+**/*.zip
+**/*.h5
+**/*.sav
+**/*.pt
+**/.ipynb_checkpoints
+**/__pycache__

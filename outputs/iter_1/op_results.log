@@ -1,0 +1,40 @@
+[1/10] Training 0.0% : Loss = 8.45529556274414
+[1/10] Training 50.0% : Loss = 1.008178949356079
+[+] Finished Training Epoch 1: Training CMAP loss: 2.855254219472408
+[+] Finished Testing Epoch 1:Testing CMAP loss: 1.891252488717437
+[2/10] Training 0.0% : Loss = 1.5160750150680542
+[2/10] Training 50.0% : Loss = 1.01852285861969
+[+] Finished Training Epoch 2: Training CMAP loss: 2.1779484505951405
+[+] Finished Testing Epoch 2:Testing CMAP loss: 1.7119416221044959
+[3/10] Training 0.0% : Loss = 3.026319980621338
+[3/10] Training 50.0% : Loss = 0.45419207215309143
+[+] Finished Training Epoch 3: Training CMAP loss: 1.9307162076234818
+[+] Finished Testing Epoch 3:Testing CMAP loss: 1.336661082804203
+[4/10] Training 0.0% : Loss = 2.0343830585479736
+[4/10] Training 50.0% : Loss = 3.767537832260132
+[+] Finished Training Epoch 4: Training CMAP loss: 1.7841148026287557
+[+] Finished Testing Epoch 4:Testing CMAP loss: 1.2641793236881496
+[5/10] Training 0.0% : Loss = 1.1595367193222046
+[5/10] Training 50.0% : Loss = 1.7132853269577026
+[+] Finished Training Epoch 5: Training CMAP loss: 1.6626094793528319
+[+] Finished Testing Epoch 5:Testing CMAP loss: 1.3016883805021644
+[6/10] Training 0.0% : Loss = 0.9324288964271545
+[6/10] Training 50.0% : Loss = 1.1540699005126953
+[+] Finished Training Epoch 6: Training CMAP loss: 1.562127623334527
+[+] Finished Testing Epoch 6:Testing CMAP loss: 1.189411525540054
+[7/10] Training 0.0% : Loss = 1.631356954574585
+[7/10] Training 50.0% : Loss = 2.6845297813415527
+[+] Finished Training Epoch 7: Training CMAP loss: 1.49274301700294
+[+] Finished Testing Epoch 7:Testing CMAP loss: 0.9977056949958205
+[8/10] Training 0.0% : Loss = 3.7566516399383545
+[8/10] Training 50.0% : Loss = 1.9998832941055298
+[+] Finished Training Epoch 8: Training CMAP loss: 1.393404880091548
+[+] Finished Testing Epoch 8:Testing CMAP loss: 0.9779802929610014
+[9/10] Training 0.0% : Loss = 0.5131457448005676
+[9/10] Training 50.0% : Loss = 2.5242536067962646
+[+] Finished Training Epoch 9: Training CMAP loss: 1.341033905595541
+[+] Finished Testing Epoch 9:Testing CMAP loss: 1.0642051092162728
+[10/10] Training 0.0% : Loss = 0.32059726119041443
+[10/10] Training 50.0% : Loss = 1.6823705434799194
+[+] Finished Training Epoch 10: Training CMAP loss: 1.2859412748366594
+[+] Finished Testing Epoch 10:Testing CMAP loss: 1.0704022120125591
