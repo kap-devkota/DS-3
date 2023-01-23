@@ -1,0 +1,40 @@
+[1/10] Training 0.0% : Loss = 9.776399612426758
+[1/10] Training 50.0% : Loss = 9.285099983215332
+[+] Finished Training Epoch 1: Training CMAP loss: 9.377, Fnat: 0.05918, F-nnat: 0.99447
+[+] Finished Testing Epoch 1:Testing CMAP loss: 8.12323, Fnat: 0.03755, Fnnat : 0.97999
+[2/10] Training 0.0% : Loss = 9.719477653503418
+[2/10] Training 50.0% : Loss = 9.133528709411621
+[+] Finished Training Epoch 2: Training CMAP loss: 9.233, Fnat: 0.06165, F-nnat: 0.99366
+[+] Finished Testing Epoch 2:Testing CMAP loss: 8.01708, Fnat: 0.03511, Fnnat : 0.97461
+[3/10] Training 0.0% : Loss = 9.03918170928955
+[3/10] Training 50.0% : Loss = 8.750184059143066
+[+] Finished Training Epoch 3: Training CMAP loss: 9.190, Fnat: 0.06093, F-nnat: 0.99426
+[+] Finished Testing Epoch 3:Testing CMAP loss: 8.08282, Fnat: 0.03657, Fnnat : 0.98855
+[4/10] Training 0.0% : Loss = 9.149580955505371
+[4/10] Training 50.0% : Loss = 9.782882690429688
+[+] Finished Training Epoch 4: Training CMAP loss: 9.222, Fnat: 0.06076, F-nnat: 0.99455
+[+] Finished Testing Epoch 4:Testing CMAP loss: 8.03893, Fnat: 0.02892, Fnnat : 0.97014
+[5/10] Training 0.0% : Loss = 8.639691352844238
+[5/10] Training 50.0% : Loss = 9.25068187713623
+[+] Finished Training Epoch 5: Training CMAP loss: 9.085, Fnat: 0.05637, F-nnat: 0.99437
+[+] Finished Testing Epoch 5:Testing CMAP loss: 7.79567, Fnat: 0.03609, Fnnat : 0.98376
+[6/10] Training 0.0% : Loss = 8.76207160949707
+[6/10] Training 50.0% : Loss = 7.9045305252075195
+[+] Finished Training Epoch 6: Training CMAP loss: 8.998, Fnat: 0.05888, F-nnat: 0.99416
+[+] Finished Testing Epoch 6:Testing CMAP loss: 7.49291, Fnat: 0.04570, Fnnat : 0.95407
+[7/10] Training 0.0% : Loss = 9.156278610229492
+[7/10] Training 50.0% : Loss = 8.753337860107422
+[+] Finished Training Epoch 7: Training CMAP loss: 8.790, Fnat: 0.05151, F-nnat: 0.99415
+[+] Finished Testing Epoch 7:Testing CMAP loss: 7.16001, Fnat: 0.02905, Fnnat : 0.96019
+[8/10] Training 0.0% : Loss = 7.2402143478393555
+[8/10] Training 50.0% : Loss = 8.32723331451416
+[+] Finished Training Epoch 8: Training CMAP loss: 8.694, Fnat: 0.05756, F-nnat: 0.99407
+[+] Finished Testing Epoch 8:Testing CMAP loss: 7.00400, Fnat: 0.02882, Fnnat : 0.97472
+[9/10] Training 0.0% : Loss = 8.539154052734375
+[9/10] Training 50.0% : Loss = 8.404343605041504
+[+] Finished Training Epoch 9: Training CMAP loss: 8.596, Fnat: 0.05892, F-nnat: 0.99388
+[+] Finished Testing Epoch 9:Testing CMAP loss: 6.90282, Fnat: 0.03687, Fnnat : 0.97121
+[10/10] Training 0.0% : Loss = 9.49492073059082
+[10/10] Training 50.0% : Loss = 8.7272310256958
+[+] Finished Training Epoch 10: Training CMAP loss: 8.595, Fnat: 0.06228, F-nnat: 0.99423
+[+] Finished Testing Epoch 10:Testing CMAP loss: 7.11299, Fnat: 0.04417, Fnnat : 0.99020
