@@ -1,6 +1,22 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+def plot_losses(
+        loss_array: np.ndarray,
+        savefig_path: str = None
+        ):
+
+    n_values = len(loss_array)
+    plt.plot(np.arange(n_values), loss_array)
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.title('Loss Curve')
+
+    if savefig_path is None:
+        plt.show()
+    else:
+        plt.savefig(savefig_path, bbox_inches='tight')
+
 def compare_cmap(
         cm_true: np.ndarray,
         cm_pred: np.ndarray,
@@ -25,6 +41,7 @@ def compare_cmap(
     if cbar:
         plt.colorbar(im0, ax=ax[0], orientation = 'horizontal')
         plt.colorbar(im1, ax=ax[1], orientation = 'horizontal')
+
     if savefig_path is None:
         plt.show()
     else:
