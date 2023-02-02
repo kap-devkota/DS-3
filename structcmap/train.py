@@ -6,17 +6,30 @@ import pandas as pd
 import numpy as np
 import h5py
 import argparse
-from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT
+from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT, WindowedStackedStructCmapCATT
 from dataset import PairData
 import os
 import matplotlib.pyplot as plt
 import re
 from metrics import calc_f_nat, calc_f_nonnat
 from plotting import plot_losses
-# python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtrain.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_d_lang_emb.h5 --device 3 --output_prefix ../outputs/iter_1/op_
-## Full
-# python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed --device 3 --output_prefix ../outputs/iter_3-train_full/op_
 
+from omegaconf import OmegaConf
+import wandb
+# python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtrain.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_d_lang_emb.h5 --device 3 --output_prefix ../outputs/iter_1/op_
+
+#iter=50;mtype=-1;dev=0;odir=../outputs/iter_${iter}-bb-debug; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtest.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_d_lang_emb.h5  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 1e-4 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 1 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir}"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+
+## Full
+# odir=../outputs/iter_13-full; if [ ! -d ${odir} ]; then mkdir ${odir}; fi; python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed --device 6 --output_prefix ${odir}/op_ --no_bins 25 --no_epoch 25
+
+# iter=49;mtype=-1;dev=0;odir=../outputs/iter_${iter}-bb-debug; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 1e-4 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 1 --conv_channels 45 --conv_kernels 5"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+
+#ESM
+#mtype=-1;dev=0;odir=../outputs/iter_19-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered-lt1000.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered-lt1000.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+
+#ESM-DEBUG
+#mtype=-1;dev=0;odir=../outputs/iter_27-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtest.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 def getargs():
     parser = argparse.ArgumentParser()
@@ -31,27 +44,57 @@ def getargs():
     parser.add_argument("--lrate", default = 1e-5, type = float)
     parser.add_argument("--no_epoch", default = 10, type = int)
     parser.add_argument("--device", default = -1, type = int)
+    parser.add_argument("--cross_block", default = 2, type = int)
     parser.add_argument("--test_image", default = 50, type = int)
     parser.add_argument("--train_image", default = 50, type = int)
     parser.add_argument("--output_prefix")
     parser.add_argument("--checkpoint", default = None)
+    parser.add_argument("--activation", default = "sigmoid")
     parser.add_argument("--model_type", type = int, default = -1)
+    parser.add_argument("--bins_weighting", type = int, default = -1)
+    parser.add_argument("--bins_window", type = int, default = 3)
+    parser.add_argument("--conv_channels", default=None)
+    parser.add_argument("--conv_kernels", default=None)
+    parser.add_argument("--iter_dir", required = True)
     return parser.parse_args()
 
+def bins_weighting(option, no_bins):
+    if option == 0:
+        return torch.ones(no_bins, dtype = torch.float32)
+    if option == 1:
+        return torch.tensor([100] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
+    if option >= 2 or option <= -1:
+        return torch.tensor([500] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
+    
 def main(args):
     if args.device < 0:
         dev = torch.device("cpu")
     else:
         dev = torch.device(args.device)
         
-    model_opts = {0: StructCmap, 1: StructCmapCATT, 2: WindowedStructCmapCATT, -1: WindowedStructCmapCATT}
+    model_opts = {0: StructCmap, 1: StructCmapCATT, 2: WindowedStructCmapCATT, 3: WindowedStackedStructCmapCATT, -1: WindowedStackedStructCmapCATT}
     modtype = model_opts[args.model_type]
     
     if args.checkpoint is None:
+        conv_kernels  = []
+        conv_channels = []
+        
+        if args.conv_channels is not None:
+            conv_channels = [int(c) for c in args.conv_channels.split(",")]
+        if args.conv_kernels is not None:
+            conv_kernels = [int(c) for c in args.conv_kernels.split(",")]
+        
+        assert len(conv_channels) == len(conv_kernels)
+        
         mod = modtype(args.input_dim,
-                    args.proj_dim, 
-                    args.no_heads,
-                    args.no_bins).to(dev)
+                    project_dim = args.proj_dim, 
+                    n_head_within = args.no_heads,
+                    n_bins = args.no_bins,
+                    activation = args.activation,
+                    n_crossblock = args.cross_block,
+                    w_size = args.bins_window,
+                    conv_channels = conv_channels, 
+                    kernels = conv_kernels).to(dev)
         start_epoch = 0
     else:
         epcmp = re.compile(r'.*_([0-9]+).sav$')
@@ -75,7 +118,7 @@ def main(args):
         os.mkdir(metrics_fld)
     
     optim = torch.optim.Adam(mod.parameters(), lr = args.lrate)
-    bins_weight = torch.ones(args.no_bins, dtype = torch.float32).to(dev)
+    bins_weight = bins_weighting(args.bins_weighting, args.no_bins).to(dev)
     #bins_weight = torch.tensor([50] * 5 + [10] * 5 + [1] * (args.no_bins - 15) + [0.125] * 5, dtype = torch.float32).to(dev)
     
     # TODO: smoothing window on the prob distribution
@@ -90,16 +133,18 @@ def main(args):
     
     no_train_batches = len(trainloader)
     no_test_batches = len(testloader)
+    np.random.seed(137)
     test_indices = set(np.random.choice(no_test_batches,
                                          size = min(args.test_image, no_test_batches // 10),
                                         replace = False))
-    
     train_indices = set(np.random.choice(no_train_batches,
                                          size = min(args.train_image, no_train_batches // 10),
                                         replace = False))
     
     tlossl = []
     loc = torch.linspace(0, 25, args.no_bins).unsqueeze(1).unsqueeze(1)
+    
+    wandb.watch(mod, log_freq = 100)
     
     for e in range(start_epoch, args.no_epoch):
         tloss = 0
@@ -133,11 +178,12 @@ def main(args):
             if i % 100 == 0:
                 file.write(f"[{e+1}/{args.no_epoch}] Training {perc_complete}% : Loss = {loss.item()}\n")
                 file.flush()
+                wandb.log({"train/loss" : loss})
             
             with torch.no_grad():
                 cm = cm.squeeze().numpy()
                 cpre = F.softmax(cpre.squeeze().cpu(), dim = 0)
-                cmout  = (torch.sum(cpre * loc, dim = 0) / 26 * args.no_bins).long().squeeze().numpy()
+                cmout  = torch.sum(cpre * loc, dim = 0).squeeze().numpy()
                 cmoutbin = cmout < 10
                 ctrue = cm / args.no_bins * 26 < 10
                 curr_f_nat  = calc_f_nat(ctrue, cmoutbin)
@@ -157,14 +203,12 @@ def main(args):
                     ax[2].set_title(f"F-nonnat : {curr_f_nonnat:.3f}")
                     fig.savefig(f"{train_fld}_img_{i}_iter{e}.png")
                     plt.close()
-                    
-                
-            
         tloss /= (i+1)
         fnat /= (i+1)
         fnnat /= (i+1)
         file.write(f"[+] Finished Training Epoch {e + 1}: Training CMAP loss: {tloss:.3f}, Fnat: {fnat:.5f}, F-nnat: {fnnat:.5f}\n")
         file.flush()
+        wandb.log({"train/fnat" : fnat, "train/fnnat" : fnnat, "epoch": e})
         torch.save(mod, f"{args.output_prefix}model_{e}.sav")
         mod.eval()
         teloss = 0
@@ -187,7 +231,7 @@ def main(args):
                 teloss += loss.item()
 
                 cpred = F.softmax(cpred.squeeze().cpu(), dim = 0)
-                cmout  = (torch.sum(cpred * loc, dim = 0) / 26 * args.no_bins).long().squeeze().numpy()
+                cmout  = torch.sum(cpred * loc, dim = 0).squeeze().numpy()
                 
                 if args.device > -1:
                     Xp = Xp.cpu()
@@ -220,9 +264,19 @@ def main(args):
         tfnnat = np.average(test_fnnat)
         file.write(f"[+] Finished Testing Epoch {e + 1}:Testing CMAP loss: {teloss:.5f}, Fnat: {tfnat:.5f}, Fnnat : {tfnnat:.5f}\n")
         file.flush()
+        wandb.log({"test/fnat" : tfnat, "test/fnnat" : tfnnat, "epoch" : e})
     plot_losses(tlossl, f"{metrics_fld}/losses.png")
-    
+
+from pathlib import Path
+
 if __name__ == "__main__":
-    main(getargs())
+    args = getargs()
+    oc = OmegaConf.create(vars(args))
+    
+    with open(f"{oc.iter_dir}/cfg.yml", "w+") as ymlf:
+        ymlf.write(OmegaConf.to_yaml(oc))
+        
+    wandb.init(project="D-SCRIPT 3D", entity="bergerlab-mit", name = Path(oc.iter_dir).name, config = dict(oc))
+    main(args)
         
     
