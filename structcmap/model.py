@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import math
 
 class StructCmap(nn.Module):
     def __init__(self, init_dim, project_dim, n_head_within, n_bins, ppi_window = 10, drop = 0.2, activation = "tanh", **kwargs):
@@ -293,7 +294,7 @@ class WindowedStackedStructCmapCATT(nn.Module):
                  activation = "sigmoid", 
                  wtype = "tri", 
                  wsize = 3,
-                 allow_cross = False, 
+                 allow_cross = True, 
                  conv_channels = [],
                  kernels = [],
                  **kwargs):
@@ -365,6 +366,319 @@ class WindowedStackedStructCmapCATT(nn.Module):
         
         if self.convlayers:
             cm = self.convblock(cm) 
+        
+        cm1  = torch.sum(cm * self.agg, axis = 1) # aggregation => batch x n_seq1 x n_seq2
+        cm1  = self.activation(cm1)
+        
+        windows = F.unfold(cm1.unsqueeze(1), kernel_size = (self.ppi_window, self.ppi_window)) # => batch x (ppi_window x ppi_window) x no_windows
+        wsum = torch.sum(windows, axis = 2)
+        
+        wsum = self.drop1(self.activation(wsum))
+        pp_prob = torch.sigmoid(torch.matmul(wsum, self.L) + self.b)
+        # cm[:, -1, :, :] /= pp_prob # If very low prob, then very large distance
+        # cm[:, :-1, :, :] /= (1-pp_prob) # If very high prob, then very low distance
+        return cm, pp_prob
+
+
+class SelfCrossBlock2(nn.Module):
+    def __init__(self, proj_dim, n_head, activation = "gelu", dropout = 0.2, allow_norm = True, **kwargs):
+        super(SelfCrossBlock2, self).__init__()
+        activations = {"sigmoid" : nn.Sigmoid(), "tanh" : nn.Tanh(), "relu" : nn.ReLU(), "gelu" : nn.GELU()}
+        if activation not in activations:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activations[activation]
+        self.mha_within = nn.MultiheadAttention(proj_dim, n_head, dropout = dropout, batch_first = True)
+        self.cross_att  = nn.MultiheadAttention(proj_dim, n_head, dropout = dropout, batch_first = True)
+        if allow_norm:
+            self.lnorm = nn.LayerNorm(proj_dim)
+        self.allow_norm = allow_norm
+        
+    """
+    def forward(self, x1, x2, x3, x4):
+        x1 = self.mha_within(x1, x1, x1)[0] + x1
+        x2 = self.mha_within(x2, x2, x2)[0] + x2
+        
+        x3_ = self.cross_att(x3, x4, x2)[0] + x3 
+        x4_ = self.cross_att(x4, x3, x1)[0] + x4 
+        return self.activation(x1), self.activation(x2), self.activation(x3_), self.activation(x4_)
+    """
+    def forward(self, x1, x2):
+        x1 = self.mha_within(x1, x1, x1)[0]
+        x2 = self.mha_within(x2, x2, x2)[0]
+        
+        x1_ = self.cross_att(x1, x2, x2)[0]
+        x2_ = self.cross_att(x2, x1, x1)[0]
+        
+        x1_ = self.activation(x1_)
+        x2_ = self.activation(x2_)
+        
+        if self.allow_norm:
+            x1_ = self.lnorm(x1_)
+            x2_ = self.lnorm(x2_)
+        return x1_, x2_
+    
+
+
+    
+    
+class PosEncode(nn.Module):
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super(PosEncode, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(1, max_len, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """
+        [batch_size, seq_len, embedding_dim]
+        """
+        x = x + self.pe[0, :x.size(0), :]
+        return self.dropout(x)
+ 
+class WindowedStackedStructCmapCATT2(nn.Module):
+    def __init__(self, 
+                 init_dim, 
+                 project_dim = 100, 
+                 n_head_within = 5, 
+                 n_crossblock = 2, 
+                 n_bins = 25, 
+                 ppi_window = 10, 
+                 drop = 0.2, 
+                 activation = "sigmoid", 
+                 wtype = "tri", 
+                 wsize = 3,
+                 conv_channels = [],
+                 kernels = [],
+                 **kwargs):
+        super(WindowedStackedStructCmapCATT2, self).__init__()
+        # activations allowed
+        activations = {"sigmoid" : nn.Sigmoid(), "tanh" : nn.Tanh(), "relu" : nn.ReLU(), "gelu" : nn.GELU()}
+        self.project    = nn.Linear(init_dim, project_dim)
+        self.drop1      = nn.Dropout(p = drop)
+        self.posenc     = PosEncode(project_dim)
+        if activation not in activations:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activations[activation]
+        
+        self.blockmodules = nn.ModuleList()
+        for i in range(n_crossblock):
+            self.blockmodules.append(SelfCrossBlock2(project_dim, n_head_within, activation = activation, dropout = drop))
+        
+        
+        # Convolution block
+        cv_channels = conv_channels + [n_bins]
+
+        self.W = nn.Parameter(torch.randn(cv_channels[0], project_dim, (project_dim // 2), dtype = torch.float32))
+        # self.W = nn.Parameter(torch.randn(cv_channels[0], 2 * project_dim, (project_dim // 2), dtype = torch.float32))
+        
+        self.convlayers = False
+        if len(cv_channels) > 1:
+            assert len(cv_channels) == (len(kernels) + 1)
+            self.convblock = ConvBlock(cv_channels, kernels, activation)
+            self.convlayers = True
+            
+        self.P = nn.Parameter(torch.randn(n_bins, ppi_window, ppi_window, dtype = torch.float32))
+        self.L = nn.Parameter(torch.randn(ppi_window * ppi_window, 1, dtype = torch.float32))
+        
+        self.ppi_window = ppi_window
+        self.agg = nn.Parameter(torch.randn(1, n_bins, 1, 1, dtype = torch.float32))
+        self.b = nn.Parameter(torch.tensor(0, dtype = torch.float32))
+        
+        assert wsize % 2 == 1
+
+        
+        
+        self.smoothpad = wsize // 2
+        self.smoothsize = wsize
+        if wtype == "rect":
+            self.smooth = nn.Parameter(torch.ones(wsize) / wsize, requires_grad = False)
+        elif wtype == "tri":
+            smooth = torch.concat([torch.linspace(0, 1, wsize // 2 + 2)[1:], torch.linspace(1, 0, wsize //2 +2)[1:-1]])
+            smooth = smooth / torch.sum(smooth)
+            self.smooth = nn.Parameter(smooth, requires_grad = False)
+            
+    
+                                       
+    def forward(self, x1, x2):
+        x1 = self.project(x1)
+        x2 = self.project(x2)
+        
+        # position encoding
+        x1 = self.posenc(x1)
+        x2 = self.posenc(x2)
+        
+#         x3 = x1
+#         x4 = x2
+#         for i, mod in enumerate(self.blockmodules):
+#             x1, x2, x3, x4 = mod(x1, x2, x3, x4)
+
+        
+#         x1 = torch.cat([x1, x3], dim = -1)
+#         x2 = torch.cat([x2, x4], dim = -1)
+                     
+        for i, mode in enumerate(self.blockmodules):
+            x3, x4 = mode(x1, x2)
+            x1 = x1 + x3
+            x2 = x2 + x4
+        
+        x1 = self.activation(x1)
+        x2 = self.activation(x2)
+                       
+        x1 = torch.matmul(x1.unsqueeze(1), self.W) # X => batch x 1 x nseq1 x proj_dim W => nbin x proj_dim x out_proj_dim # batch x nbin x nseq x out_proj_dim
+        x2 = torch.matmul(x2.unsqueeze(1), self.W) 
+        
+        x1 = self.drop1(self.activation(x1))
+        x2 = self.drop1(self.activation(x2)) # batch x nbin x n_seq x pr_dim
+        cm  = torch.matmul(x1, torch.transpose(x2, 2, 3))  # batch x n_bin x n_seq1 x pr_dim times batch x n_bin x pr_dim x n_seq2 => batch x n_bin x n_seq1 x n_seq2  
+        if self.convlayers:
+            cm = self.convblock(cm) 
+        
+        ## Window here
+        cm = F.pad(cm, (0, 0, 0, 0, self.smoothpad, self.smoothpad)).unfold(1, self.smoothsize, 1) #batch x n_bin x n_seq1 x n_seq2 x window
+        cm = torch.sum(cm * self.smooth.view(1, 1, 1, 1, -1), dim = 4)
+        
+        
+        cm1  = torch.sum(cm * self.agg, axis = 1) # aggregation => batch x n_seq1 x n_seq2
+        cm1  = self.activation(cm1)
+        
+        windows = F.unfold(cm1.unsqueeze(1), kernel_size = (self.ppi_window, self.ppi_window)) # => batch x (ppi_window x ppi_window) x no_windows
+        wsum = torch.sum(windows, axis = 2)
+        
+        wsum = self.drop1(self.activation(wsum))
+        pp_prob = torch.sigmoid(torch.matmul(wsum, self.L) + self.b)
+        # cm[:, -1, :, :] /= pp_prob # If very low prob, then very large distance
+        # cm[:, :-1, :, :] /= (1-pp_prob) # If very high prob, then very low distance
+        return cm, pp_prob
+    
+    
+#####################################    
+######## Full-on Transformer ########
+#####################################
+class SelfCrossBlock3(nn.Module):
+    def __init__(self, proj_dim, n_head, activation = "gelu", dropout = 0.2, n_transformer = 2, **kwargs):
+        super(SelfCrossBlock3, self).__init__()
+        activations = {"sigmoid" : nn.Sigmoid(), "tanh" : nn.Tanh(), "relu" : nn.ReLU(), "gelu" : nn.GELU()}
+        if activation not in activations:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activations[activation]
+        
+        # within encoder
+        within_encoder = nn.TransformerEncoderLayer(d_model= proj_dim, nhead = n_head, dim_feedforward = proj_dim, dropout = dropout, batch_first = True) 
+        self.mha_within = nn.TransformerEncoder(within_encoder, num_layers = n_transformer)
+        
+        # cross decoder
+        cross_decoder = nn.TransformerDecoderLayer(d_model= proj_dim, nhead = n_head, dim_feedforward = proj_dim, dropout = dropout, batch_first = True)
+        self.cross_att  = nn.TransformerDecoder(cross_decoder, num_layers = n_transformer)
+    
+    def forward(self, x1, x2):
+        x1 = self.mha_within(x1)
+        x2 = self.mha_within(x2)
+        
+        x1_ = self.cross_att(x1, x2)
+        x2_ = self.cross_att(x2, x1)
+        
+        return self.activation(x1_), self.activation(x2_)
+    
+ 
+class WindowedStackedStructCmapCATT3(nn.Module):
+    def __init__(self, 
+                 init_dim, 
+                 project_dim = 100, 
+                 n_head_within = 5, 
+                 n_crossblock = 1, 
+                 n_crossblock_layers=2,
+                 n_bins = 25, 
+                 ppi_window = 10, 
+                 drop = 0.2, 
+                 activation = "sigmoid", 
+                 wtype = "tri", 
+                 wsize = 3,
+                 conv_channels = [],
+                 kernels = [],
+                 **kwargs):
+        super(WindowedStackedStructCmapCATT3, self).__init__()
+        # activations allowed
+        activations = {"sigmoid" : nn.Sigmoid(), "tanh" : nn.Tanh(), "relu" : nn.ReLU(), "gelu" : nn.GELU()}
+        self.project    = nn.Linear(init_dim, project_dim)
+        self.drop1      = nn.Dropout(p = drop)
+        self.posenc     = PosEncode(project_dim)
+        if activation not in activations:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activations[activation]
+        
+        self.blockmodules = nn.ModuleList()
+        for i in range(n_crossblock):
+            self.blockmodules.append(SelfCrossBlock3(project_dim, n_head_within, activation = activation, dropout = drop, n_transformer = n_crossblock_layers))
+        
+        
+        # Convolution block
+        cv_channels = conv_channels + [n_bins]
+        self.W = nn.Parameter(torch.randn(cv_channels[0], project_dim, (project_dim // 2), dtype = torch.float32))
+        
+        self.convlayers = False
+        if len(cv_channels) > 1:
+            assert len(cv_channels) == (len(kernels) + 1)
+            self.convblock = ConvBlock(cv_channels, kernels, activation)
+            self.convlayers = True
+            
+        self.P = nn.Parameter(torch.randn(n_bins, ppi_window, ppi_window, dtype = torch.float32))
+        self.L = nn.Parameter(torch.randn(ppi_window * ppi_window, 1, dtype = torch.float32))
+        
+        self.ppi_window = ppi_window
+        self.agg = nn.Parameter(torch.randn(1, n_bins, 1, 1, dtype = torch.float32))
+        self.b = nn.Parameter(torch.tensor(0, dtype = torch.float32))
+        
+        assert wsize % 2 == 1
+        
+        self.smoothpad = wsize // 2
+        self.smoothsize = wsize
+        if wtype == "rect":
+            self.smooth = nn.Parameter(torch.ones(wsize) / wsize, requires_grad = False)
+        elif wtype == "tri":
+            smooth = torch.concat([torch.linspace(0, 1, wsize // 2 + 2)[1:], torch.linspace(1, 0, wsize //2 +2)[1:-1]])
+            smooth = smooth / torch.sum(smooth)
+            self.smooth = nn.Parameter(smooth, requires_grad = False)
+            
+    
+                                       
+    def forward(self, x1, x2):
+        x1 = self.project(x1)
+        x2 = self.project(x2)
+        
+        # position encoding
+        x1 = self.posenc(x1)
+        x2 = self.posenc(x2)
+        
+                     
+        for i, mode in enumerate(self.blockmodules):
+            x3, x4 = mode(x1, x2)
+            x1 = x1 + x3
+            x2 = x2 + x4
+        
+        x1 = self.activation(x1)
+        x2 = self.activation(x2)
+                       
+        x1 = torch.matmul(x1.unsqueeze(1), self.W) # X => batch x 1 x nseq1 x proj_dim W => nbin x proj_dim x out_proj_dim # batch x nbin x nseq x out_proj_dim
+        x2 = torch.matmul(x2.unsqueeze(1), self.W) 
+        
+        x1 = self.drop1(self.activation(x1))
+        x2 = self.drop1(self.activation(x2)) # batch x nbin x n_seq x pr_dim
+        cm  = torch.matmul(x1, torch.transpose(x2, 2, 3))  # batch x n_bin x n_seq1 x pr_dim times batch x n_bin x pr_dim x n_seq2 => batch x n_bin x n_seq1 x n_seq2  
+        if self.convlayers:
+            cm = self.convblock(cm) 
+        
+        ## Window here
+        cm = F.pad(cm, (0, 0, 0, 0, self.smoothpad, self.smoothpad)).unfold(1, self.smoothsize, 1) #batch x n_bin x n_seq1 x n_seq2 x window
+        cm = torch.sum(cm * self.smooth.view(1, 1, 1, 1, -1), dim = 4)
+        
         
         cm1  = torch.sum(cm * self.agg, axis = 1) # aggregation => batch x n_seq1 x n_seq2
         cm1  = self.activation(cm1)

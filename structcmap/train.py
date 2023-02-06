@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import h5py
 import argparse
-from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT, WindowedStackedStructCmapCATT
+from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT, WindowedStackedStructCmapCATT, WindowedStackedStructCmapCATT2, WindowedStackedStructCmapCATT3
 from dataset import PairData
 import os
 import matplotlib.pyplot as plt
@@ -16,20 +16,40 @@ from plotting import plot_losses
 
 from omegaconf import OmegaConf
 import wandb
+
+
+"""
+TODO:
+
+SKIP CONNECTION
+CHANGE LINEAR TO FF and add activation
+WEIGHT DECAY AND Stronger dropout
+LayerNorm
+"""
+
+
+################
+### BB-DEBUG ###
+################
+
 # python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtrain.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_d_lang_emb.h5 --device 3 --output_prefix ../outputs/iter_1/op_
 
-#iter=50;mtype=-1;dev=0;odir=../outputs/iter_${iter}-bb-debug; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtest.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_d_lang_emb.h5  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 1e-4 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 1 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir}"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+#iter=83;mtype=-1;dev=7;odir=../outputs/iter_${iter}-bb-debug-tformer; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/esm_test.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 1e-3 --no_epoch 25 --activation sigmoid --model_type $mtype --cross_block 1 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir}"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
-## Full
-# odir=../outputs/iter_13-full; if [ ! -d ${odir} ]; then mkdir ${odir}; fi; python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed --device 6 --output_prefix ${odir}/op_ --no_bins 25 --no_epoch 25
 
-# iter=49;mtype=-1;dev=0;odir=../outputs/iter_${iter}-bb-debug; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 1e-4 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 1 --conv_channels 45 --conv_kernels 5"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+##############
+## BB-FULL ###
+##############
+
+# odir=../outputs/iter_13-full; if [ ! -d ${odir} ]; then mkdir ${odir}; fi; python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/esm_test.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed --device 6 --output_prefix ${odir}/op_ --no_bins 25 --no_epoch 25
+
+# iter=75;mtype=-1;dev=0;odir=../outputs/iter_${iter}-bb-full; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered.tsv --test ../data/pairs/esm_test.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 2e-4 --no_epoch 100 --activation sigmoid --model_type $mtype --cross_block 5 --conv_channels 45 --conv_kernels 5  --iter_dir ${odir}"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 #ESM
-#mtype=-1;dev=0;odir=../outputs/iter_19-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered-lt1000.tsv --test ../data/pairs/lynntao_pdbseqs_TEST-SET_cmap-filtered-lt1000.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+#mtype=-1;dev=0;odir=../outputs/iter_19-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/lynntao_pdbseqs_TRAIN-SET_cmap-filtered-lt1000.tsv --test ../data/pairs/esm_test.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 #ESM-DEBUG
-#mtype=-1;dev=0;odir=../outputs/iter_27-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtest.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+#mtype=-1;dev=0;odir=../outputs/iter_27-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/esm_test.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 def getargs():
     parser = argparse.ArgumentParser()
@@ -56,6 +76,7 @@ def getargs():
     parser.add_argument("--conv_channels", default=None)
     parser.add_argument("--conv_kernels", default=None)
     parser.add_argument("--iter_dir", required = True)
+    parser.add_argument("--n_transformer_block", default = 2, type = int)
     return parser.parse_args()
 
 def bins_weighting(option, no_bins):
@@ -63,7 +84,9 @@ def bins_weighting(option, no_bins):
         return torch.ones(no_bins, dtype = torch.float32)
     if option == 1:
         return torch.tensor([100] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
-    if option >= 2 or option <= -1:
+    if option == 2:
+        return torch.tensor([500] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
+    if option >= 3 or option <= -1:
         return torch.tensor([500] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
     
 def main(args):
@@ -72,7 +95,8 @@ def main(args):
     else:
         dev = torch.device(args.device)
         
-    model_opts = {0: StructCmap, 1: StructCmapCATT, 2: WindowedStructCmapCATT, 3: WindowedStackedStructCmapCATT, -1: WindowedStackedStructCmapCATT}
+    model_opts = {0: StructCmap, 1: StructCmapCATT, 2: WindowedStructCmapCATT, 3: WindowedStackedStructCmapCATT, 
+                  4: WindowedStackedStructCmapCATT2, 5: WindowedStackedStructCmapCATT3, -1: WindowedStackedStructCmapCATT3}
     modtype = model_opts[args.model_type]
     
     if args.checkpoint is None:
@@ -94,6 +118,7 @@ def main(args):
                     n_crossblock = args.cross_block,
                     w_size = args.bins_window,
                     conv_channels = conv_channels, 
+                    n_transformer = args.n_transformer_block,
                     kernels = conv_kernels).to(dev)
         start_epoch = 0
     else:
@@ -117,7 +142,7 @@ def main(args):
         print(f"[+] Creating folder {metrics_fld}")
         os.mkdir(metrics_fld)
     
-    optim = torch.optim.Adam(mod.parameters(), lr = args.lrate)
+    optim = torch.optim.Adam(mod.parameters(), lr = args.lrate) # weight decay on optimizer 1e-2
     bins_weight = bins_weighting(args.bins_weighting, args.no_bins).to(dev)
     #bins_weight = torch.tensor([50] * 5 + [10] * 5 + [1] * (args.no_bins - 15) + [0.125] * 5, dtype = torch.float32).to(dev)
     
