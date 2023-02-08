@@ -14,11 +14,12 @@ import logging as lg
 from pathlib import Path
 from omegaconf import OmegaConf
 import wandb
+import json
 import typing as T
 
 from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT, WindowedStackedStructCmapCATT, WindowedStackedStructCmapCATT2, WindowedStackedStructCmapCATT3
 from dataset import PairData
-from metrics import calc_f_nat, calc_f_nonnat
+from metrics import calc_f_nat, calc_f_nonnat, calc_top_k_precision, calc_top_Ldiv_precision
 from plotting import compare_cmaps, plot_fnat_histograms
 
 """
@@ -141,6 +142,8 @@ def bins_weighting(option, no_bins):
     
 def main(args):
     logg = lg.getLogger(LOGGER_NAME)
+    logg.info(json.dumps(vars(args), indent=4))
+    
     logg.info(f"Logging to {args.iter_dir}/results.log")
     
     if args.device < 0:
@@ -181,7 +184,6 @@ def main(args):
         
     image_fld = f"{args.iter_dir}/images/"
     train_fld = f"{args.iter_dir}/train_images/"
-    metrics_fld = f"{args.iter_dir}/metrics/"
     
     if not os.path.isdir(image_fld):
         logg.info(f"Creating folder {image_fld}")
@@ -190,10 +192,6 @@ def main(args):
     if not os.path.isdir(train_fld):
         logg.info(f"Creating folder {train_fld}")
         os.mkdir(train_fld)
-        
-    if not os.path.isdir(metrics_fld):
-        logg.info(f"Creating folder {metrics_fld}")
-        os.mkdir(metrics_fld)
     
     optim = torch.optim.Adam(mod.parameters(), lr = args.lrate) # weight decay on optimizer 1e-2
     bins_weight = bins_weighting(args.bins_weighting, args.no_bins).to(dev)
@@ -228,6 +226,8 @@ def main(args):
         mod.train()
         fnat = 0
         fnnat = 0
+        train_topprecision = []
+        
         for i, data in enumerate(trainloader):
             score, Xp, Xq, cm = data
             optim.zero_grad()
@@ -265,9 +265,13 @@ def main(args):
                     
                 curr_f_nat  = calc_f_nat(ctrue, cmout, thresh = args.angstrom_threshold)
                 curr_f_nonnat = calc_f_nonnat(ctrue, cmout, thresh = args.angstrom_threshold)
+                curr_top10_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 10)
+                curr_top50_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 50)
+                curr_topL10_prec = calc_top_Ldiv_precision(ctrue, cmout, thresh = args.angstrom_threshold, Ldiv = 10)
                 
                 fnat += curr_f_nat
                 fnnat += curr_f_nonnat
+                train_topprecision.append([curr_top10_prec, curr_top50_prec, curr_topL10_prec])
                 
                 ## Create images here
                 if i in train_indices:
@@ -280,13 +284,16 @@ def main(args):
         tloss /= (i+1)
         fnat /= (i+1)
         fnnat /= (i+1)
-        logg.info(f"Finished Training Epoch {e + 1}: Training CMAP loss: {tloss:.3f}, Fnat: {fnat:.5f}, F-nnat: {fnnat:.5f}")
+        topprec = np.average(train_topprecision, axis=0)
+        
+        logg.info(f"Finished Training Epoch {e + 1}: Training CMAP loss: {tloss:.3f}, Fnat: {fnat:.5f}, F-nnat: {fnnat:.5f}, Top (10, 50, L/10) precision: {topprec}")
         if not args.DEBUG: wandb.log({"train/fnat" : fnat, "train/fnnat" : fnnat, "epoch": e})
         if not args.DEBUG: torch.save(mod, f"{args.iter_dir}/model_{e}.sav")
         mod.eval()
         teloss = 0
         test_fnat = []
         test_fnnat = []
+        test_topprecision = []
         with torch.no_grad():
             for i, data in enumerate(testloader):
                 sc, Xp, Xq, cm = data
@@ -315,9 +322,13 @@ def main(args):
                 ctrue = (cm / args.no_bins * 26)
                 curr_f_nat  = calc_f_nat(ctrue, cmout, thresh = args.angstrom_threshold)
                 curr_f_nonnat = calc_f_nonnat(ctrue, cmout, thresh = args.angstrom_threshold)
+                curr_top10_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 10)
+                curr_top50_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 50)
+                curr_topL10_prec = calc_top_Ldiv_precision(ctrue, cmout, thresh = args.angstrom_threshold, Ldiv = 10)
                 
                 test_fnat.append(curr_f_nat)
                 test_fnnat.append(curr_f_nonnat)
+                test_topprecision.append([curr_top10_prec, curr_top50_prec, curr_topL10_prec])
                 
                 if i in test_indices:
                     compare_cmaps(ctrue, cmout,
@@ -329,31 +340,38 @@ def main(args):
         teloss /= (i+1)
         tfnat = np.average(test_fnat)
         tfnnat = np.average(test_fnnat)
+        ttopprec = np.average(test_topprecision, axis=0)
         
         # Fnat/Fnnat histograms for test set
         plot_fnat_histograms(test_fnat, test_fnnat, f"{image_fld}_iter{e}_histograms.png")
         
-        logg.info(f"Finished Testing Epoch {e + 1}:Testing CMAP loss: {teloss:.5f}, Fnat: {tfnat:.5f}, Fnnat : {tfnnat:.5f}")
+        logg.info(f"Finished Testing Epoch {e + 1}:Testing CMAP loss: {teloss:.5f}, Fnat: {tfnat:.5f}, Fnnat : {tfnnat:.5f}, Top (10, 50, L/10) precision: {ttopprec}")
         if not args.DEBUG: wandb.log({"test/fnat" : tfnat, "test/fnnat" : tfnnat, "epoch" : e})
 
 if __name__ == "__main__":
+    # Read Arguments
     args = getargs()
     oc = OmegaConf.create(vars(args))
     
+    # Create Project Directory
     try:
         os.makedirs(Path(oc.iter_dir))
     except FileExistsError:
         raise FileExistsError(f"Results already exist at {oc.iter_dir} - would be overwritten.")
     
+    # Initialize Logging
     oc.log_level = "DEBUG" if args.DEBUG else "INFO"
     config_logger(
         file = f"{oc.iter_dir}/results.log",
         level = oc.log_level,
     )
-    
     if not args.DEBUG: wandb.init(project="D-SCRIPT 3D", entity="bergerlab-mit", name = Path(oc.iter_dir).name, config = dict(oc))
+    
+    # Write Config
     with open(f"{oc.iter_dir}/cfg.yml", "w+") as ymlf:
         ymlf.write(OmegaConf.to_yaml(oc))
+    
+    # MAIN
     main(args)
         
     
