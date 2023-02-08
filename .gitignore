@@ -1,3 +1,4 @@
+# File Types
 **/*.png
 **/*.zip
 **/*.h5
@@ -6,3 +7,7 @@
 **/.ipynb_checkpoints
 **/__pycache__
 **/.nfs*
+
+# Directories
+wandb/
+outputs/
