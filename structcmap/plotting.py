@@ -32,8 +32,8 @@ def compare_cmaps(
     vmax: float = 26,
     savefig_path: str = None
 ):
-    cm_true_bin = (cm_true < thresh).astype(int)
-    cm_pred_bin = (cm_pred < thresh).astype(int)
+    cm_true_bin = (cm_true < thresh).long()
+    cm_pred_bin = (cm_pred < thresh).long()
     
     fig, ax = plt.subplots(1, 4, figsize=(15, 5))
     fig.suptitle(suptitle)

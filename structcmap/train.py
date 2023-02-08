@@ -19,7 +19,7 @@ import typing as T
 
 from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT, WindowedStackedStructCmapCATT, WindowedStackedStructCmapCATT2, WindowedStackedStructCmapCATT3
 from dataset import PairData
-from metrics import calc_f_nat, calc_f_nonnat, calc_top_k_precision, calc_top_Ldiv_precision
+from metrics import calc_f_nat, calc_f_nonnat, calc_top_k_precision, calc_top_Ldiv_precision, FNat, FNonNat, TopKPrecision, TopLPrecision
 from plotting import compare_cmaps, plot_fnat_histograms
 
 """
@@ -143,8 +143,9 @@ def bins_weighting(option, no_bins):
 def main(args):
     logg = lg.getLogger(LOGGER_NAME)
     logg.info(json.dumps(vars(args), indent=4))
-    
     logg.info(f"Logging to {args.iter_dir}/results.log")
+    
+    set_random_seed(args.random_state)
     
     if args.device < 0:
         dev = torch.device("cpu")
@@ -207,7 +208,7 @@ def main(args):
     
     no_train_batches = len(trainloader)
     no_test_batches = len(testloader)
-    set_random_seed(args.random_state)
+    
     test_indices = set(np.random.choice(no_test_batches,
                                          size = min(args.test_image, no_test_batches // 10),
                                         replace = False))
@@ -220,13 +221,28 @@ def main(args):
     
     if not args.DEBUG: wandb.watch(mod, log_freq = args.wandb_freq)
     
+    # Metrics
+    train_metrics = {
+        "train/fnat": FNat(thresh = args.angstrom_threshold),
+        "train/fnnat": FNonNat(thresh = args.angstrom_threshold),
+        "train/top10precision": TopKPrecision(thresh = args.angstrom_threshold, k = 10),
+        "train/top50precision": TopKPrecision(thresh = args.angstrom_threshold, k = 50),
+        "train/topL10precision": TopLPrecision(thresh = args.angstrom_threshold, Ldiv = 10),  
+    }
+    
+    test_metrics = {
+        "test/fnat": FNat(thresh = args.angstrom_threshold),
+        "test/fnnat": FNonNat(thresh = args.angstrom_threshold),
+        "test/top10precision": TopKPrecision(thresh = args.angstrom_threshold, k = 10),
+        "test/top50precision": TopKPrecision(thresh = args.angstrom_threshold, k = 50),
+        "test/topL10precision": TopLPrecision(thresh = args.angstrom_threshold, Ldiv = 10),
+    }
+    
     logg.info("Beginning training")
     for e in range(start_epoch, args.no_epoch):
-        tloss = 0
         mod.train()
-        fnat = 0
-        fnnat = 0
-        train_topprecision = []
+        
+        tloss = 0
         
         for i, data in enumerate(trainloader):
             score, Xp, Xq, cm = data
@@ -258,42 +274,37 @@ def main(args):
                 if not args.DEBUG: wandb.log({"train/loss" : loss})
             
             with torch.no_grad():
-                cm = cm.squeeze().numpy()
+                cm = cm.squeeze()
                 cpre = F.softmax(cpre.squeeze().cpu(), dim = 0)
-                cmout  = torch.sum(cpre * loc, dim = 0).squeeze().numpy()
+                cmout  = torch.sum(cpre * loc, dim = 0).squeeze()
                 ctrue = (cm / args.no_bins * 26)
-                    
-                curr_f_nat  = calc_f_nat(ctrue, cmout, thresh = args.angstrom_threshold)
-                curr_f_nonnat = calc_f_nonnat(ctrue, cmout, thresh = args.angstrom_threshold)
-                curr_top10_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 10)
-                curr_top50_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 50)
-                curr_topL10_prec = calc_top_Ldiv_precision(ctrue, cmout, thresh = args.angstrom_threshold, Ldiv = 10)
                 
-                fnat += curr_f_nat
-                fnnat += curr_f_nonnat
-                train_topprecision.append([curr_top10_prec, curr_top50_prec, curr_topL10_prec])
+                for met in train_metrics.values():
+                    met.update(ctrue, cmout)
                 
                 ## Create images here
                 if i in train_indices:
                     compare_cmaps(ctrue, cmout,
                                   thresh = args.angstrom_threshold,
-                                  suptitle = f"Fnat : {curr_f_nat:.3f}, Fnonnat : {curr_f_nonnat:.3f}", 
+                                  suptitle = f"Fnat : {calc_f_nat(ctrue, cmout):.3f}, Fnonnat : {calc_f_nonnat(ctrue, cmout):.3f}", 
                                   savefig_path = f"{train_fld}_img_{i}_iter{e}.png"
                                  )
                     
         tloss /= (i+1)
-        fnat /= (i+1)
-        fnnat /= (i+1)
-        topprec = np.average(train_topprecision, axis=0)
         
-        logg.info(f"Finished Training Epoch {e + 1}: Training CMAP loss: {tloss:.3f}, Fnat: {fnat:.5f}, F-nnat: {fnnat:.5f}, Top (10, 50, L/10) precision: {topprec}")
-        if not args.DEBUG: wandb.log({"train/fnat" : fnat, "train/fnnat" : fnnat, "epoch": e})
-        if not args.DEBUG: torch.save(mod, f"{args.iter_dir}/model_{e}.sav")
+        train_metric_results = {k: met.compute() for k, met in train_metrics.items()}
+        metstring = ", ".join([f"{k.split('/')[-1]}: {v:.5f}" for k,v in train_metric_results.items()])
+        logg.info(f"Finished Training Epoch {e + 1}: cmap loss: {tloss:.5f} {metstring}")
+        if not args.DEBUG: 
+            train_metric_results["epoch"] = e
+            wandb.log(train_metric_results)
+            torch.save(mod, f"{args.iter_dir}/model_{e}.sav")
+        
+        for met in train_metrics.values():
+            met.reset()
+            
         mod.eval()
         teloss = 0
-        test_fnat = []
-        test_fnnat = []
-        test_topprecision = []
         with torch.no_grad():
             for i, data in enumerate(testloader):
                 sc, Xp, Xq, cm = data
@@ -315,39 +326,33 @@ def main(args):
                     Xp = Xp.cpu()
                     Xq = Xq.cpu()
                     cm = cm.cpu()
-                cm = cm.numpy()
                 
                 ## Metrics to be added
-                cmout  = torch.sum(cpred * loc, dim = 0).squeeze().numpy()
+                cmout  = torch.sum(cpred * loc, dim = 0).squeeze()
                 ctrue = (cm / args.no_bins * 26)
-                curr_f_nat  = calc_f_nat(ctrue, cmout, thresh = args.angstrom_threshold)
-                curr_f_nonnat = calc_f_nonnat(ctrue, cmout, thresh = args.angstrom_threshold)
-                curr_top10_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 10)
-                curr_top50_prec = calc_top_k_precision(ctrue, cmout, thresh = args.angstrom_threshold, k = 50)
-                curr_topL10_prec = calc_top_Ldiv_precision(ctrue, cmout, thresh = args.angstrom_threshold, Ldiv = 10)
                 
-                test_fnat.append(curr_f_nat)
-                test_fnnat.append(curr_f_nonnat)
-                test_topprecision.append([curr_top10_prec, curr_top50_prec, curr_topL10_prec])
+                for met in test_metrics.values():
+                    met.update(ctrue, cmout)
                 
                 if i in test_indices:
                     compare_cmaps(ctrue, cmout,
                                   thresh = args.angstrom_threshold,
-                                  suptitle = f"Fnat : {curr_f_nat:.3f}, Fnonnat : {curr_f_nonnat:.3f}", 
+                                  suptitle = f"Fnat : {calc_f_nat(ctrue, cmout):.3f}, Fnonnat : {calc_f_nonnat(ctrue, cmout):.3f}",
                                   savefig_path = f"{image_fld}_img_{i}_iter{e}.png"
                                  )
 
         teloss /= (i+1)
-        tfnat = np.average(test_fnat)
-        tfnnat = np.average(test_fnnat)
-        ttopprec = np.average(test_topprecision, axis=0)
         
-        # Fnat/Fnnat histograms for test set
-        plot_fnat_histograms(test_fnat, test_fnnat, f"{image_fld}_iter{e}_histograms.png")
-        
-        logg.info(f"Finished Testing Epoch {e + 1}:Testing CMAP loss: {teloss:.5f}, Fnat: {tfnat:.5f}, Fnnat : {tfnnat:.5f}, Top (10, 50, L/10) precision: {ttopprec}")
-        if not args.DEBUG: wandb.log({"test/fnat" : tfnat, "test/fnnat" : tfnnat, "epoch" : e})
+        test_metric_results = {k: met.compute() for k, met in test_metrics.items()}
+        metstring = ", ".join([f"{k.split('/')[-1]}: {v:.5f}" for k,v in test_metric_results.items()])
+        logg.info(f"Finished Testing Epoch {e + 1}: cmap loss: {teloss:.5f} {metstring}")
+        if not args.DEBUG:
+            test_metric_results["epoch"] = e
+            wandb.log(test_metric_results)
 
+        for met in test_metrics.values():
+            met.reset()
+        
 if __name__ == "__main__":
     # Read Arguments
     args = getargs()
