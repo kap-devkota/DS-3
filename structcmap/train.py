@@ -55,7 +55,7 @@ LayerNorm
 #ESM-DEBUG
 #mtype=-1;dev=0;odir=../outputs/iter_27-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/esm_test.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
-#iter=95;mtype=-1;dev=1;odir=../outputs/iter_${iter}-esm-mid-tformer; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_tr.tsv --test ../data/pairs/esm_test-lt1000.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5   --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 2 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir} --n_transformer_block 5"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+#iter=96;mtype=-1;dev=1;odir=../outputs/iter_${iter}-esm-mid-tformer; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_tr.tsv --test ../data/pairs/esm_test-lt1000.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5   --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 2 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir} --n_transformer_block 5 --DEBUG"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 def set_random_seed(seed):
     torch.manual_seed(seed)
@@ -381,10 +381,10 @@ if __name__ == "__main__":
     oc = OmegaConf.create(vars(args))
     
     # Create Project Directory
-    try:
-        os.makedirs(Path(oc.iter_dir))
-    except FileExistsError:
-        raise FileExistsError(f"Results already exist at {oc.iter_dir} - would be overwritten.")
+#     try:
+#         os.makedirs(Path(oc.iter_dir))
+#     except FileExistsError:
+#         raise FileExistsError(f"Results already exist at {oc.iter_dir} - would be overwritten.")
     
     # Initialize Logging
     oc.log_level = "DEBUG" if args.DEBUG else "INFO"
