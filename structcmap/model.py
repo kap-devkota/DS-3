@@ -563,7 +563,7 @@ class WindowedStackedStructCmapCATT2(nn.Module):
 class SelfCrossBlock3(nn.Module):
     def __init__(self, proj_dim, n_head, activation = "gelu", dropout = 0.2, n_transformer = 2, **kwargs):
         super(SelfCrossBlock3, self).__init__()
-        activations = {"sigmoid" : nn.Sigmoid(), "tanh" : nn.Tanh(), "relu" : nn.ReLU(), "gelu" : nn.GELU()}
+        activations = {"sigmoid" : torch.sigmoid, "tanh" : torch.tanh, "relu" : torch.relu, "gelu" : F.gelu}
         if activation not in activations:
             self.activation = nn.Identity()
         else:
@@ -691,4 +691,109 @@ class WindowedStackedStructCmapCATT3(nn.Module):
         # cm[:, -1, :, :] /= pp_prob # If very low prob, then very large distance
         # cm[:, :-1, :, :] /= (1-pp_prob) # If very high prob, then very low distance
         return cm, pp_prob
-    
+
+#################################################
+#################################################
+#################################################
+#################################################
+class WindowedStackedStructCmapCATT4(nn.Module):
+    def __init__(self, 
+                 init_dim, 
+                 project_ff_dims = [256, 100], 
+                 n_head_within = 5, 
+                 n_crossblock = 1, 
+                 n_crossblock_layers=2,
+                 n_bins = 25, 
+                 drop = 0.2, 
+                 activation = "sigmoid", 
+                 wtype = "tri", 
+                 wsize = 3,
+                 conv_channels = [],
+                 kernels = [],
+                 **kwargs):
+        super(WindowedStackedStructCmapCATT4, self).__init__()
+        # activations allowed
+        activations = {"sigmoid" : torch.sigmoid, "tanh" : torch.tanh, "relu" : torch.relu, "gelu" : F.gelu}
+        
+        project = []
+        prev_dim = init_dim
+        for i in project_ff_dims:
+            project += [nn.Linear(prev_dim, i), nn.ReLU()]
+            prev_dim = i
+        
+        project_dim = project_ff_dims[-1]
+        
+        self.project = nn.Sequential(*project)
+        
+        self.drop1      = nn.Dropout(p = drop)
+        self.posenc     = PosEncode(project_dim)
+        if activation not in activations:
+            self.activation = nn.Identity()
+        else:
+            self.activation = activations[activation]
+        
+        self.blockmodules = nn.ModuleList()
+        for i in range(n_crossblock):
+            self.blockmodules.append(SelfCrossBlock3(project_dim, n_head_within, activation = activation, dropout = drop, n_transformer = n_crossblock_layers))
+        
+        # Convolution block
+        cv_channels = conv_channels + [n_bins]
+        self.W = nn.Parameter(torch.randn(cv_channels[0], project_dim, (project_dim // 2), dtype = torch.float32))
+        
+        self.convlayers = False
+        if len(cv_channels) > 1:
+            assert len(cv_channels) == (len(kernels) + 1)
+            self.convblock = ConvBlock(cv_channels, kernels, activation)
+            self.convlayers = True
+        
+        self.skip_connection = False if "skip_connection" not in kwargs else kwargs["skip_connection"]
+        assert wsize % 2 == 1
+        
+        self.smoothpad = wsize // 2
+        self.smoothsize = wsize
+        if wtype == "rect":
+            self.smooth = nn.Parameter(torch.ones(wsize) / wsize, requires_grad = False)
+        elif wtype == "tri":
+            smooth = torch.concat([torch.linspace(0, 1, wsize // 2 + 2)[1:], torch.linspace(1, 0, wsize //2 +2)[1:-1]])
+            smooth = smooth / torch.sum(smooth)
+            self.smooth = nn.Parameter(smooth, requires_grad = False)
+           
+                                       
+    def forward(self, x1, x2):
+        x1 = self.project(x1)
+        x2 = self.project(x2)
+        
+        # position encoding
+        x1 = self.posenc(x1)
+        x2 = self.posenc(x2)
+        
+        # For skip connection
+        x1_ = x1
+        x2_ = x2
+        for i, mode in enumerate(self.blockmodules):
+            x3, x4 = mode(x1, x2)
+            x1 = x1 + x3
+            x2 = x2 + x4
+            
+        # Skip connection
+        if self.skip_connection:
+            x1 = x1 + x1_
+            x2 = x2 + x2_
+        
+        x1 = self.activation(x1)
+        x2 = self.activation(x2)
+                       
+        x1 = torch.matmul(x1.unsqueeze(1), self.W) # X => batch x 1 x nseq1 x proj_dim W => nbin x proj_dim x out_proj_dim # batch x nbin x nseq x out_proj_dim
+        x2 = torch.matmul(x2.unsqueeze(1), self.W) 
+        
+        x1 = self.drop1(self.activation(x1))
+        x2 = self.drop1(self.activation(x2)) # batch x nbin x n_seq x pr_dim
+        cm  = torch.matmul(x1, torch.transpose(x2, 2, 3))  # batch x n_bin x n_seq1 x pr_dim times batch x n_bin x pr_dim x n_seq2 => batch x n_bin x n_seq1 x n_seq2  
+        if self.convlayers:
+            cm = self.convblock(cm) 
+        
+        ## Window here
+        cm = F.pad(cm, (0, 0, 0, 0, self.smoothpad, self.smoothpad)).unfold(1, self.smoothsize, 1) #batch x n_bin x n_seq1 x n_seq2 x window
+        cm = torch.sum(cm * self.smooth.view(1, 1, 1, 1, -1), dim = 4)
+        
+        return cm

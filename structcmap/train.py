@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import h5py
 import argparse
-from model import StructCmap, StructCmapCATT, WindowedStructCmapCATT, WindowedStackedStructCmapCATT, WindowedStackedStructCmapCATT2, WindowedStackedStructCmapCATT3
+from model import WindowedStackedStructCmapCATT, WindowedStackedStructCmapCATT2, WindowedStackedStructCmapCATT3, WindowedStackedStructCmapCATT4
 from dataset import PairData
 import os
 import matplotlib.pyplot as plt
@@ -34,7 +34,7 @@ LayerNorm
 
 # python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/human_cm_dtrain.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_d_lang_emb.h5 --device 3 --output_prefix ../outputs/iter_1/op_
 
-#iter=83;mtype=-1;dev=7;odir=../outputs/iter_${iter}-bb-debug-tformer; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/esm_test.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed  --device ${dev} --output_prefix ${odir}/op_ --input_dim 6165 --no_bins 25 --lrate 1e-3 --no_epoch 25 --activation sigmoid --model_type $mtype --cross_block 1 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir}"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+#iter=95;mtype=-1;dev=1;odir=../outputs/iter_${iter}-bb-debug-tformer; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_tr.tsv --test ../data/pairs/esm_test.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/lynnemb/new_cmap_embed  --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 2 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir} --n_transformer_block 5"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 
 ##############
@@ -50,6 +50,8 @@ LayerNorm
 
 #ESM-DEBUG
 #mtype=-1;dev=0;odir=../outputs/iter_27-esm; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_cm_dtrain.tsv --test ../data/pairs/esm_test.tsv --cmap ../data/emb/cmap_d_emb.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5 --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
+
+#iter=95;mtype=-1;dev=1;odir=../outputs/iter_${iter}-esm-mid-tformer; if [ ! -d ${odir} ]; then mkdir ${odir}; cp train.py model.py $odir/; fi; CMD="python train.py --train ../data/pairs/human_tr.tsv --test ../data/pairs/esm_test-lt1000.tsv --cmap ../../D-SCRIPT/data/embeddings/cmap-latest.h5 --cmap_lang ../data/emb/cmap_lang_esm.h5   --device ${dev} --output_prefix ${odir}/op_ --input_dim 1280 --no_bins 25 --lrate 1e-3 --no_epoch 50 --activation sigmoid --model_type $mtype --cross_block 2 --conv_channels 45 --conv_kernels 5 --iter_dir ${odir} --n_transformer_block 5"; sed -Ei "1 i # Trained with command: $CMD" $odir/train.py; $CMD;
 
 def getargs():
     parser = argparse.ArgumentParser()
@@ -73,11 +75,15 @@ def getargs():
     parser.add_argument("--model_type", type = int, default = -1)
     parser.add_argument("--bins_weighting", type = int, default = -1)
     parser.add_argument("--bins_window", type = int, default = 3)
-    parser.add_argument("--conv_channels", default=None)
-    parser.add_argument("--conv_kernels", default=None)
+    parser.add_argument("--conv_channels", default = None)
+    parser.add_argument("--conv_kernels", default = None)
     parser.add_argument("--iter_dir", required = True)
+    parser.add_argument("--weight_decay", default=1e-12, type = float)
+    parser.add_argument("--dropout", default = 0.15, type = float)
+    parser.add_argument("--dist_thres", default = 8, type = float)
     parser.add_argument("--n_transformer_block", default = 2, type = int)
     return parser.parse_args()
+
 
 def bins_weighting(option, no_bins):
     if option == 0:
@@ -88,6 +94,7 @@ def bins_weighting(option, no_bins):
         return torch.tensor([500] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
     if option >= 3 or option <= -1:
         return torch.tensor([500] * 5 + [10] * 5 + [1] * (no_bins - 15) + [0.125] * 5, dtype = torch.float32)
+
     
 def main(args):
     if args.device < 0:
@@ -95,8 +102,11 @@ def main(args):
     else:
         dev = torch.device(args.device)
         
-    model_opts = {0: StructCmap, 1: StructCmapCATT, 2: WindowedStructCmapCATT, 3: WindowedStackedStructCmapCATT, 
-                  4: WindowedStackedStructCmapCATT2, 5: WindowedStackedStructCmapCATT3, -1: WindowedStackedStructCmapCATT3}
+    model_opts = {0: WindowedStackedStructCmapCATT, 
+                  1: WindowedStackedStructCmapCATT2, 
+                  2: WindowedStackedStructCmapCATT3, 
+                  3: WindowedStackedStructCmapCATT4, 
+                  -1: WindowedStackedStructCmapCATT4}
     modtype = model_opts[args.model_type]
     
     if args.checkpoint is None:
@@ -109,17 +119,20 @@ def main(args):
             conv_kernels = [int(c) for c in args.conv_kernels.split(",")]
         
         assert len(conv_channels) == len(conv_kernels)
-        
+        skip_connection = True if args.cross_block > 1 else False
         mod = modtype(args.input_dim,
-                    project_dim = args.proj_dim, 
+                    project_dim = [# 256, 
+                                   args.proj_dim], 
                     n_head_within = args.no_heads,
                     n_bins = args.no_bins,
                     activation = args.activation,
                     n_crossblock = args.cross_block,
                     w_size = args.bins_window,
+                    drop = args.dropout,
                     conv_channels = conv_channels, 
                     n_transformer = args.n_transformer_block,
-                    kernels = conv_kernels).to(dev)
+                    kernels = conv_kernels,
+                    skip_connection = skip_connection).to(dev)
         start_epoch = 0
     else:
         epcmp = re.compile(r'.*_([0-9]+).sav$')
@@ -142,7 +155,7 @@ def main(args):
         print(f"[+] Creating folder {metrics_fld}")
         os.mkdir(metrics_fld)
     
-    optim = torch.optim.Adam(mod.parameters(), lr = args.lrate) # weight decay on optimizer 1e-2
+    optim = torch.optim.Adam(mod.parameters(), lr = args.lrate, weight_decay = args.weight_decay) # weight decay on optimizer 1e-2
     bins_weight = bins_weighting(args.bins_weighting, args.no_bins).to(dev)
     #bins_weight = torch.tensor([50] * 5 + [10] * 5 + [1] * (args.no_bins - 15) + [0.125] * 5, dtype = torch.float32).to(dev)
     
@@ -169,9 +182,10 @@ def main(args):
     tlossl = []
     loc = torch.linspace(0, 25, args.no_bins).unsqueeze(1).unsqueeze(1)
     
-    wandb.watch(mod, log_freq = 100)
+    wandb.watch(mod, log_freq = 1000)
     
     for e in range(start_epoch, args.no_epoch):
+        
         tloss = 0
         mod.train()
         fnat = 0
@@ -184,7 +198,12 @@ def main(args):
             cm = cm.to(dev)
             score = score.to(dev)
             
-            cpre, cppi = mod(Xp, Xq) # cpred = batch x nbins x nseq1 x nseq2
+            r_out = mod(Xp, Xq)
+            if len(r_out) == 2:
+                cpre, cppi = r_out # cpred = batch x nbins x nseq1 x nseq2
+            else:
+                cpre = r_out
+                
             cpred = cpre.view(1, args.no_bins, -1).contiguous() # batch x nbins x(nseq1 . nseq2)
             cpred = torch.transpose(cpred, 2, 1).squeeze() # (nseq1 . nseq2) x nbins
             loss  = lossf(cpred, cm.view(-1)) # (nseq1 . nseq2)
@@ -203,14 +222,15 @@ def main(args):
             if i % 100 == 0:
                 file.write(f"[{e+1}/{args.no_epoch}] Training {perc_complete}% : Loss = {loss.item()}\n")
                 file.flush()
-                wandb.log({"train/loss" : loss})
+                if i % 1000 == 0:
+                    wandb.log({"train/loss" : loss})
             
             with torch.no_grad():
                 cm = cm.squeeze().numpy()
                 cpre = F.softmax(cpre.squeeze().cpu(), dim = 0)
                 cmout  = torch.sum(cpre * loc, dim = 0).squeeze().numpy()
-                cmoutbin = cmout < 10
-                ctrue = cm / args.no_bins * 26 < 10
+                cmoutbin = cmout < args.dist_thres
+                ctrue = cm / args.no_bins * 26 < args.dist_thres
                 curr_f_nat  = calc_f_nat(ctrue, cmoutbin)
                 curr_f_nonnat = calc_f_nonnat(ctrue, cmoutbin)
                 
@@ -235,6 +255,7 @@ def main(args):
         file.flush()
         wandb.log({"train/fnat" : fnat, "train/fnnat" : fnnat, "epoch": e})
         torch.save(mod, f"{args.output_prefix}model_{e}.sav")
+        
         mod.eval()
         teloss = 0
         test_fnat = []
@@ -248,14 +269,18 @@ def main(args):
 
                 cm = cm.squeeze()
 
-                cpred, p = mod(Xp, Xq)
+                cpred = mod(Xp, Xq)
+                
+                if len(cpred) == 2:
+                    cpred, p = cpred
+                
                 cmpred = cpred.view(1, args.no_bins, -1).contiguous()
                 cmpred = torch.transpose(cmpred, 2, 1).squeeze()
-                loss  = lossf(cmpred, cm.view(-1))
+                loss   = lossf(cmpred, cm.view(-1))
 
                 teloss += loss.item()
 
-                cpred = F.softmax(cpred.squeeze().cpu(), dim = 0)
+                cpred  = F.softmax(cpred.squeeze().cpu(), dim = 0)
                 cmout  = torch.sum(cpred * loc, dim = 0).squeeze().numpy()
                 
                 if args.device > -1:
@@ -266,8 +291,8 @@ def main(args):
                 cm = cm.numpy()
                 
                 ## Metrics to be added
-                ctrue = cm / args.no_bins * 26 < 10
-                cpre  = cmout < 10
+                ctrue = cm / args.no_bins * 26 < args.dist_thres
+                cpre  = cmout < args.dist_thres
                 curr_f_nat = calc_f_nat(ctrue, cpre)
                 curr_f_nonnat = calc_f_nonnat(ctrue, cpre)
                 
@@ -276,8 +301,8 @@ def main(args):
                 
                 if i in test_indices:
                     fig, ax = plt.subplots(1, 4)
-                    ax[0].imshow(cm / args.no_bins * 26 < 10)
-                    ax[1].imshow(cmout < 10)
+                    ax[0].imshow(ctrue)
+                    ax[1].imshow(cpre)
                     ax[2].imshow(25 - (cm / args.no_bins * 26))
                     ax[3].imshow(25 - cmout)
                     ax[1].set_title(f"Fnat : {curr_f_nat:.3f}")
