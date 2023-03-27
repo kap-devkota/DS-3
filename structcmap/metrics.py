@@ -151,3 +151,16 @@ def calc_top_Ldiv_precision(cm_true: torch.Tensor, cm_pred: torch.Tensor, Ldiv =
         raise ValueError(f"Ldiv={Ldiv} is greater than the minimum sequence {L}")
     
     return calc_top_k_precision(cm_true, cm_pred, k = max(int(L / Ldiv), 1), thresh = thresh)
+
+def calc_interfacial_contact_density(cm_true: torch.Tensor, thresh: float = 8):
+    """
+    cm_true is the true distogram. Distances less than thresh will be considered positives.
+    This function computes the interfacial contact density N / (L1L2) where N is the number
+    of inter-protein contacts and L1 and L2 are the lengths of the constituent monomers.
+    """
+    L1, L2 = cm_true.shape
+    
+    cm_true_bin = (cm_true < thresh).long()
+    N = cm_true_bin.sum()
+    
+    return N / (L1 * L2)
